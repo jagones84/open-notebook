@@ -294,7 +294,10 @@ class TestBuildSectionPrompt:
         report = composition.build_section_prompt(section, chunks, "report", "it")
         assert "bullets per section" in deck
         assert "bullets per section" not in report
-        assert "Write in it" in deck
+        # A raw ISO code ("it") is ignored by the model; the prompt must carry
+        # the language NAME.
+        assert "Write in Italian" in deck
+        assert "Write in it" not in deck
 
     def test_chunks_are_numbered_for_citation(self):
         section = outline.Section(title="One", queries=["alpha"])

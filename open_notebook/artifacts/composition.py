@@ -29,6 +29,7 @@ from open_notebook.artifacts.outline import (
     Section,
     instructions_block,
     kind_label,
+    language_name,
     normalize_kind,
     plan_outline,
 )
@@ -347,7 +348,7 @@ def build_section_prompt(
         section: Planned section.
         chunks: Excerpts retrieved for the section.
         kind: Artifact kind.
-        language: Language the section is written in.
+        language: Language the section is written in (code or name).
         instructions: Optional user brief.
         allow_diagrams: Ask for a ```mermaid``` fence when the section fits.
 
@@ -363,7 +364,7 @@ def build_section_prompt(
         thesis=section.thesis or "(none)",
         instructions_block=instructions_block(instructions),
         chunks_block=chunks_block(chunks),
-        language=language,
+        language=language_name(language),
         rules=rules,
         diagrams=DIAGRAM_RULES if allow_diagrams else "",
     )
@@ -534,7 +535,8 @@ async def build_document(
             kind,
             comp.instructions,
             cfg.outline_max_sections,
-            comp.model_id,
+            model_id=comp.model_id,
+            language=comp.language,
         )
     )
 

@@ -183,3 +183,118 @@ class TestCompleteText:
 
         monkeypatch.setattr(model, "ainvoke", structured)
         assert await outline.complete_text("prompt") == "# Joined"
+
+
+class TestOutputBudgets:
+    """The output budget must be explicit: the provisioned default (850 tokens,
+    measured) is spent entirely by a reasoning model's thinking block, and the
+    reply then comes back empty with ``finish_reason=length``."""
+
+    @pytest.mark.asyncio
+    async def test_complete_text_sends_the_completion_budget(self, monkeypatch):
+        captured: dict = {}
+
+        async def fake_provision(content, model_id, default_type, **kwargs):
+            captured.update(kwargs)
+            return _FakeModel("ok")
+
+        monkeypatch.setattr(outline, "provision_langchain_model", fake_provision)
+
+        await outline.complete_text("prompt")
+
+        assert captured["max_tokens"] == outline.DEFAULT_COMPLETION_MAX_TOKENS
+
+    @pytest.mark.asyncio
+    async def test_complete_text_accepts_an_explicit_budget(self, monkeypatch):
+        captured: dict = {}
+
+        async def fake_provision(content, model_id, default_type, **kwargs):
+            captured.update(kwargs)
+            return _FakeModel("ok")
+
+        monkeypatch.setattr(outline, "provision_langchain_model", fake_provision)
+
+        await outline.complete_text("prompt", max_tokens=123)
+
+        assert captured["max_tokens"] == 123
+
+    @pytest.mark.asyncio
+    async def test_plan_outline_uses_the_outline_budget(self, monkeypatch):
+        captured: dict = {}
+
+        async def fake_complete(
+            prompt, model_id=None, default_type="chat", max_tokens=None
+        ):
+            captured["max_tokens"] = max_tokens
+            return VALID_REPLY
+
+        monkeypatch.setattr(outline, "complete_text", fake_complete)
+
+        sections = await outline.plan_outline(["Source A"], "Title", "report")
+
+        assert captured["max_tokens"] == outline.DEFAULT_OUTLINE_MAX_TOKENS
+        assert [s.title for s in sections] == ["Intro", "Deep dive"]
+
+    def test_both_budgets_are_above_the_provisioned_default(self):
+        assert outline.DEFAULT_OUTLINE_MAX_TOKENS > 850
+        assert outline.DEFAULT_COMPLETION_MAX_TOKENS > 850
+
+
+class TestOutlineRetry:
+    """A single unusable planner reply must not drop the document onto the
+    generic English skeleton: the planning call is retried."""
+
+    @pytest.mark.asyncio
+    async def test_bad_first_reply_is_retried(self, monkeypatch):
+        replies = iter(["{broken", VALID_REPLY])
+
+        async def fake_complete(
+            prompt, model_id=None, default_type="chat", max_tokens=None
+        ):
+            return next(replies)
+
+        monkeypatch.setattr(outline, "complete_text", fake_complete)
+
+        sections = await outline.plan_outline(["Source A"], "Title", "report")
+
+        assert [s.title for s in sections] == ["Intro", "Deep dive"]
+
+    @pytest.mark.asyncio
+    async def test_every_bad_reply_falls_back_to_the_skeleton(self, monkeypatch):
+        calls: dict = {"n": 0}
+
+        async def fake_complete(
+            prompt, model_id=None, default_type="chat", max_tokens=None
+        ):
+            calls["n"] += 1
+            return "{broken"
+
+        monkeypatch.setattr(outline, "complete_text", fake_complete)
+
+        sections = await outline.plan_outline(["Source A"], "Title", "report", "", 2)
+
+        assert calls["n"] == outline.DEFAULT_OUTLINE_ATTEMPTS
+        assert [s.title for s in sections] == ["Overview", "Key points"]
+
+
+class TestLanguageName:
+    """A raw ISO code ("it") is ignored by the model; the prompts must carry
+    the language NAME."""
+
+    def test_codes_become_names(self):
+        assert outline.language_name("it") == "Italian"
+        assert outline.language_name("EN") == "English"
+        assert outline.language_name("zh") == "Chinese"
+
+    def test_names_and_unknown_values_pass_through(self):
+        assert outline.language_name("Italian") == "Italian"
+        assert outline.language_name("Klingon") == "Klingon"
+        assert outline.language_name("") == ""
+
+    def test_outline_prompt_states_the_language_by_name(self):
+        prompt = outline.build_outline_prompt(["S"], "T", "report", "", 4, "it")
+        assert "Write the section titles in Italian" in prompt
+
+    def test_outline_prompt_omits_the_language_when_unset(self):
+        prompt = outline.build_outline_prompt(["S"], "T", "report")
+        assert "Write the section titles" not in prompt

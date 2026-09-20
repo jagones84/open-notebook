@@ -39,6 +39,43 @@ KINDS = ("report", "deck")
 DEFAULT_MAX_SECTIONS = 10
 DEFAULT_LANGUAGE = "en"
 
+#: Output-token budgets for the model calls.
+#:
+#: The provisioned model is built with a very small default budget (measured:
+#: 850 tokens with an OpenRouter model), and a REASONING model spends that
+#: whole budget inside its thinking block: the reply comes back with
+#: ``finish_reason=length`` and EMPTY content, so the outline silently degrades
+#: to the fallback skeleton and most sections are dropped. The app already
+#: passes an explicit budget elsewhere for the same reason (``graphs/chat.py``
+#: uses 8192), so the artifact calls do too.
+DEFAULT_COMPLETION_MAX_TOKENS = 4096
+DEFAULT_OUTLINE_MAX_TOKENS = 2048
+
+#: Planner attempts. Measured: a reasoning model occasionally answers the
+#: planning prompt with prose or an empty block instead of the JSON object, and
+#: a single bad reply used to drop the whole document onto the generic
+#: fallback skeleton (English, no relation to the sources) - so the planning
+#: call is retried once before giving up.
+DEFAULT_OUTLINE_ATTEMPTS = 2
+
+#: ISO 639-1 code -> the language NAME a model reliably understands.
+#: Measured: "Write in it" gets ignored, "Write in Italian" does not.
+LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "it": "Italian",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt": "Portuguese",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ru": "Russian",
+    "pl": "Polish",
+    "tr": "Turkish",
+    "ca": "Catalan",
+    "bn": "Bengali",
+}
+
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*\n(.*?)\n```\s*$", re.DOTALL)
 
@@ -64,7 +101,7 @@ TITLE: {title}
 DOCUMENT TYPE: {kind_label}
 SOURCES AVAILABLE IN THE NOTEBOOK:
 {source_list}
-{instructions_block}
+{instructions_block}{language_block}
 Plan the document in AT MOST {max_sections} sections.
 
 MANDATORY RULES:
@@ -163,6 +200,39 @@ def instructions_block(instructions: str) -> str:
     )
 
 
+def language_name(value: str) -> str:
+    """Translate a language code to the name used inside the prompts.
+
+    A model asked to "write in it" regularly answers in English, while "write
+    in Italian" is followed reliably; the API passes whatever the client sent,
+    which is normally an ISO 639-1 code.
+
+    Args:
+        value: Language code (``it``) or an already human-readable name
+            (``Italian``).
+
+    Returns:
+        The language name, or the input unchanged when it is not a known code.
+    """
+    text = (value or "").strip()
+    return LANGUAGE_NAMES.get(text.lower(), text)
+
+
+def language_block(language: str) -> str:
+    """Render the outline language instruction.
+
+    Args:
+        language: Language code or name.
+
+    Returns:
+        The instruction as a prompt block, or an empty string when unset.
+    """
+    name = language_name(language)
+    if not name:
+        return ""
+    return f"\nWrite the section titles in {name}.\n"
+
+
 def strip_code_fences(text: str) -> str:
     """Remove a wrapping ```...``` block if the model added one.
 
@@ -178,7 +248,10 @@ def strip_code_fences(text: str) -> str:
 
 
 async def complete_text(
-    prompt: str, model_id: Optional[str] = None, default_type: str = "chat"
+    prompt: str,
+    model_id: Optional[str] = None,
+    default_type: str = "chat",
+    max_tokens: int = DEFAULT_COMPLETION_MAX_TOKENS,
 ) -> str:
     """Run one prompt through the provisioned language model.
 
@@ -187,6 +260,10 @@ async def complete_text(
         model_id: Optional explicit Model record id; when omitted the default
             model for ``default_type`` is used.
         default_type: Default-model type to fall back on (``chat``).
+        max_tokens: Output-token budget. Passed explicitly because the
+            provisioned default is far too small for a reasoning model, which
+            would return an empty reply after thinking (see
+            ``DEFAULT_COMPLETION_MAX_TOKENS``).
 
     Returns:
         The reply text, with thinking blocks and code fences removed.
@@ -194,7 +271,9 @@ async def complete_text(
     Raises:
         ConfigurationError: If no usable language model is configured.
     """
-    model = await provision_langchain_model(prompt, model_id, default_type)
+    model = await provision_langchain_model(
+        prompt, model_id, default_type, max_tokens=max_tokens
+    )
     response = await model.ainvoke(prompt)
     content = extract_text_content(response.content)
     return strip_code_fences(clean_thinking_content(content))
@@ -206,6 +285,7 @@ def build_outline_prompt(
     kind: str,
     instructions: str = "",
     max_sections: int = DEFAULT_MAX_SECTIONS,
+    language: str = "",
 ) -> str:
     """Assemble the single planning prompt.
 
@@ -215,6 +295,7 @@ def build_outline_prompt(
         kind: Artifact kind.
         instructions: Optional user brief.
         max_sections: Maximum number of sections the planner may produce.
+        language: Language code or name for the section titles.
 
     Returns:
         The complete outline prompt.
@@ -225,6 +306,7 @@ def build_outline_prompt(
         kind_label=kind_label(kind),
         source_list=source_list,
         instructions_block=instructions_block(instructions),
+        language_block=language_block(language),
         max_sections=max_sections,
     )
 
@@ -308,8 +390,10 @@ async def plan_outline(
     instructions: str = "",
     max_sections: int = DEFAULT_MAX_SECTIONS,
     model_id: Optional[str] = None,
+    language: str = "",
+    attempts: int = DEFAULT_OUTLINE_ATTEMPTS,
 ) -> list[Section]:
-    """Plan the document with one LLM call.
+    """Plan the document with one LLM call, retried once on a bad reply.
 
     Args:
         source_titles: Titles of the sources in the notebook.
@@ -318,19 +402,32 @@ async def plan_outline(
         instructions: Optional user brief.
         max_sections: Maximum number of sections.
         model_id: Optional explicit Model record id.
+        language: Language code or name for the section titles.
+        attempts: How many times to ask before falling back.
 
     Returns:
-        The planned sections, or ``fallback_outline()`` when the reply cannot
-        be parsed.
+        The planned sections, or ``fallback_outline()`` when every reply is
+        unusable.
     """
     prompt = build_outline_prompt(
-        source_titles, title, kind, instructions, max_sections
+        source_titles, title, kind, instructions, max_sections, language
     )
-    reply: Any = await complete_text(prompt, model_id=model_id)
-    try:
-        sections = parse_outline(reply, max_sections)
-    except ValueError as exc:
-        logger.warning(f"Outline unusable ({exc}); using the default outline")
-        return fallback_outline(title, max_sections)
-    logger.info(f"Outline planned: {len(sections)} section(s)")
-    return sections
+    last_error = ""
+    for attempt in range(1, max(attempts, 1) + 1):
+        reply: Any = await complete_text(
+            prompt, model_id=model_id, max_tokens=DEFAULT_OUTLINE_MAX_TOKENS
+        )
+        try:
+            sections = parse_outline(reply, max_sections)
+        except ValueError as exc:
+            last_error = str(exc)
+            logger.warning(f"Outline attempt {attempt}/{attempts} unusable ({exc})")
+            continue
+        logger.info(f"Outline planned: {len(sections)} section(s)")
+        return sections
+
+    logger.warning(
+        f"Outline unusable after {attempts} attempt(s) ({last_error}); "
+        "using the default outline"
+    )
+    return fallback_outline(title, max_sections)
