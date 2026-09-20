@@ -30,8 +30,10 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
+            request = httpx.Request("POST", web_search.TAVILY_ENDPOINT)
+            response = httpx.Response(self.status_code, request=request)
             raise httpx.HTTPStatusError(
-                f"HTTP {self.status_code}", request=self.request, response=self
+                f"HTTP {self.status_code}", request=request, response=response
             )
 
 
