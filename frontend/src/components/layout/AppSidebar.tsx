@@ -41,6 +41,7 @@ import {
   Wrench,
   Command,
   Globe,
+  BarChart3,
 } from 'lucide-react'
 
 const getNavigation = (t: TFunction) => [
@@ -62,6 +63,7 @@ const getNavigation = (t: TFunction) => [
     items: [
       { name: t('navigation.podcasts'), href: '/podcasts', icon: Mic, iconClass: 'text-mauve' },
       { name: t('navigation.discover'), href: '/discover', icon: Globe, iconClass: 'text-fern' },
+      { name: t('navigation.artifacts'), href: '/artifacts', icon: BarChart3, iconClass: 'text-gold' },
     ],
   },
   {
