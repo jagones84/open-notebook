@@ -18,8 +18,28 @@ import type { ArtifactFormat, ArtifactKind } from '@/lib/types/artifacts'
 
 const KIND_OPTIONS: ArtifactKind[] = ['report', 'deck']
 const FORMAT_OPTIONS: ArtifactFormat[] = ['md', 'html', 'docx', 'pptx']
-const LANGUAGE_OPTIONS = ['en', 'it', 'es', 'fr', 'de', 'pt', 'zh', 'ja'] as const
+const LANGUAGE_OPTIONS = [
+  'en',
+  'it',
+  'es',
+  'fr',
+  'de',
+  'pt',
+  'zh',
+  'ja',
+  'ru',
+  'pl',
+  'tr',
+  'ca',
+  'bn',
+] as const
 const SECTION_OPTIONS = [4, 6, 10] as const
+const SUPPORTED_LANGUAGES: readonly string[] = LANGUAGE_OPTIONS
+
+export function defaultArtifactLanguage(uiLanguage: string): string {
+  const base = (uiLanguage || '').split('-')[0].toLowerCase()
+  return SUPPORTED_LANGUAGES.includes(base) ? base : 'en'
+}
 
 export interface ArtifactFormValues {
   notebookId: string
@@ -47,12 +67,14 @@ export function ArtifactForm({
   submitting,
   onSubmit,
 }: ArtifactFormProps) {
-  const { t } = useTranslation()
+  const { t, language: uiLanguage } = useTranslation()
   const [notebookId, setNotebookId] = useState('')
   const [kind, setKind] = useState<ArtifactKind>('report')
   const [title, setTitle] = useState('')
   const [formats, setFormats] = useState<ArtifactFormat[]>(['md', 'docx'])
-  const [language, setLanguage] = useState('en')
+  const [language, setLanguage] = useState(() =>
+    defaultArtifactLanguage(uiLanguage)
+  )
   const [sections, setSections] = useState<number>(6)
 
   const hasNotebooks = notebooks.length > 0
