@@ -539,7 +539,7 @@ class TestAssembleAndConfig:
 
     def test_config_defaults_match_the_standalone_config(self):
         cfg = composition.config_from_dict(None)
-        assert cfg.outline_max_sections == 10
+        assert cfg.outline_max_sections == 5
         assert cfg.min_score == 0.2
         assert cfg.chunks_per_query == 10
         assert cfg.max_chunks_per_section == 30
@@ -593,3 +593,20 @@ class TestSectionFormatRules:
 
     def test_the_report_does_not_cap_the_prose_at_four_lines(self):
         assert "max 4 lines" not in outline.SECTION_RULES_REPORT
+
+
+class TestBookShape:
+    """A document is a BOOK: a few broad chapters, a lot of prose."""
+
+    def test_the_default_outline_is_only_a_handful_of_sections(self):
+        assert outline.DEFAULT_MAX_SECTIONS <= 6
+        assert composition.RetrievalConfig().outline_max_sections <= 6
+
+    def test_the_report_rules_ask_for_a_long_chapter_of_prose(self):
+        rules = outline.SECTION_RULES_REPORT
+        assert "chapter" in rules
+        assert "words" in rules
+        assert "bullet" in rules
+
+    def test_the_outline_prompt_asks_for_few_broad_chapters(self):
+        assert "chapter" in outline.OUTLINE_PROMPT

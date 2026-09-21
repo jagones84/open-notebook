@@ -39,7 +39,7 @@ class ArtifactGenerationRequest(BaseModel):
     language: str = "en"
     title: Optional[str] = None
     instructions: Optional[str] = None
-    sections: int = 10
+    sections: int = 5
     model_id: Optional[str] = None
 
 

@@ -89,7 +89,7 @@ class RetrievalConfig:
     """
 
     enabled: bool = True
-    outline_max_sections: int = 10
+    outline_max_sections: int = 5
     chunks_per_query: int = 10
     max_chunks_per_section: int = 30
     max_chunks_per_source: int = 4

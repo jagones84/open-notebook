@@ -184,3 +184,9 @@ class TestDeleteArtifact:
         assert response.json()["artifact_id"] == "generated_artifact:1"
         assert not target.exists()
         assert artifact.deleted is True
+
+
+def test_the_default_request_asks_for_a_handful_of_sections():
+    """A book is a few broad chapters, not ten topic headings."""
+    request = artifacts_router.ArtifactGenerationRequest(notebook_id="notebook:1")
+    assert request.sections <= 6

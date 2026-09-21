@@ -36,7 +36,7 @@ Complete = Callable[[str], Awaitable[str]]
 #: called it ``slides``; the stored record uses the spec's naming).
 KINDS = ("report", "deck")
 
-DEFAULT_MAX_SECTIONS = 10
+DEFAULT_MAX_SECTIONS = 5
 DEFAULT_LANGUAGE = "en"
 
 #: Output-token budgets for the model calls.
@@ -135,6 +135,8 @@ MANDATORY RULES:
   sources, NOT questions) used to retrieve that section's material.
 - If two sections would use the same material, merge them.
 - Cover the topic completely but without repetition.
+- Prefer a FEW, BROAD chapters: each section is a chapter of a book, not a
+  topic heading. Merge two thin sections into one rather than splitting.
 - Never plan a "Sources", "References" or "Bibliography" section: that list is
   appended automatically, from the sources actually cited.
 """
@@ -146,9 +148,12 @@ SECTION_RULES_DECK = """- Bullets first: one idea per bullet, short (max 25 word
   content: a wall of fragments is worse than one clear paragraph.
 - The shape serves the material, not the other way around."""
 
-SECTION_RULES_REPORT = """- Write prose, in short paragraphs; use bullets only for genuine lists.
-- Depth over brevity: go as deep as the MATERIAL allows on the concrete
-  details, without repeating yourself and without filler."""
+SECTION_RULES_REPORT = """- Write PROSE in paragraphs. Use a bullet list only when the material really
+  is a list: a chapter made of bullets is not a book.
+- This section is a CHAPTER: aim for 700-1200 words, developed in several
+  paragraphs around the concrete details of the MATERIAL.
+- Depth over brevity: do not cut the reasoning short, and never pad or repeat
+  yourself to reach the length."""
 
 DIAGRAM_RULES = """- If the section describes a process, an architecture, a flow or a
   structured comparison, add ONE ```mermaid block with a valid diagram
