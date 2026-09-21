@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useArtifactFormStore } from '@/lib/stores/artifact-form-store'
 import type { ArtifactFormat, ArtifactKind } from '@/lib/types/artifacts'
 
 const KIND_OPTIONS: ArtifactKind[] = ['report', 'deck']
@@ -69,7 +70,8 @@ export function ArtifactForm({
 }: ArtifactFormProps) {
   const { t, language: uiLanguage } = useTranslation()
   const [notebookId, setNotebookId] = useState('')
-  const [kind, setKind] = useState<ArtifactKind>('report')
+  const kind = useArtifactFormStore((state) => state.kind)
+  const setKind = useArtifactFormStore((state) => state.setKind)
   const [title, setTitle] = useState('')
   const [formats, setFormats] = useState<ArtifactFormat[]>(['md', 'docx'])
   const [language, setLanguage] = useState(() =>
