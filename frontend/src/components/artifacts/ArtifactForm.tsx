@@ -128,7 +128,7 @@ export function ArtifactForm({
         <div className="space-y-2">
           <Label htmlFor="artifact-notebook">{t('artifacts.notebookLabel')}</Label>
           <Select value={notebookId} onValueChange={setNotebookId}>
-            <SelectTrigger id="artifact-notebook">
+            <SelectTrigger id="artifact-notebook" className="w-full">
               <SelectValue placeholder={t('artifacts.notebookPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
@@ -147,7 +147,7 @@ export function ArtifactForm({
             value={kind}
             onValueChange={(value) => setKind(value as ArtifactKind)}
           >
-            <SelectTrigger id="artifact-kind">
+            <SelectTrigger id="artifact-kind" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -168,7 +168,7 @@ export function ArtifactForm({
             value={variant}
             onValueChange={(value) => setVariant(value as ArtifactVariant)}
           >
-            <SelectTrigger id="artifact-variant">
+            <SelectTrigger id="artifact-variant" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -216,7 +216,7 @@ export function ArtifactForm({
         <div className="space-y-2">
           <Label htmlFor="artifact-language">{t('artifacts.languageLabel')}</Label>
           <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger id="artifact-language">
+            <SelectTrigger id="artifact-language" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -235,7 +235,7 @@ export function ArtifactForm({
             value={String(sections)}
             onValueChange={(value) => setSections(Number(value))}
           >
-            <SelectTrigger id="artifact-sections">
+            <SelectTrigger id="artifact-sections" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
