@@ -32,7 +32,7 @@ export default function DiscoverPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
+      <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto space-y-6 p-6">
         <header className="space-y-1">
           <h1 className="font-display text-2xl font-semibold">
             {t('discover.title')}
