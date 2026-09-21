@@ -37,6 +37,7 @@ class _FakeArtifact:
         self.formats = kwargs.get("formats")
         self.language = kwargs.get("language")
         self.sections = kwargs.get("sections")
+        self.variant = kwargs.get("variant")
         self.output_path = None
         self.note_id = None
         self.command: Any = None
@@ -95,6 +96,29 @@ class TestSubmitGenerationJob:
         assert args["notebook_id"] == "notebook:1"
         assert args["kind"] == "deck"
         assert args["formats"] == ["pptx"]
+
+    @pytest.mark.asyncio
+    async def test_the_variant_is_stored_and_submitted(self, monkeypatch):
+        _patch(monkeypatch)
+
+        await ArtifactService.submit_generation_job(
+            notebook_id="notebook:1", kind="report", variant="illustrated"
+        )
+
+        assert created[0].variant == "illustrated"
+        assert submitted[0][2]["variant"] == "illustrated"
+
+    @pytest.mark.asyncio
+    async def test_a_variant_of_the_other_kind_is_rejected(self, monkeypatch):
+        _patch(monkeypatch)
+
+        with pytest.raises(ValueError):
+            await ArtifactService.submit_generation_job(
+                notebook_id="notebook:1", kind="report", variant="presenter"
+            )
+
+        assert created == []
+        assert submitted == []
 
     @pytest.mark.asyncio
     async def test_unknown_formats_fall_back_to_defaults(self, monkeypatch):

@@ -15,9 +15,27 @@ import {
 } from '@/components/ui/select'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useArtifactFormStore } from '@/lib/stores/artifact-form-store'
-import type { ArtifactFormat, ArtifactKind } from '@/lib/types/artifacts'
+import {
+  ARTIFACT_VARIANTS,
+  type ArtifactFormat,
+  type ArtifactKind,
+  type ArtifactVariant,
+} from '@/lib/types/artifacts'
 
 const KIND_OPTIONS: ArtifactKind[] = ['report', 'deck']
+
+/**
+ * i18n key per variant, spelled out instead of built from the variant name:
+ * the locale lint scans source files for literal keys, so a computed key would
+ * look unused and its translation would be dropped at the next cleanup.
+ */
+const VARIANT_LABEL_KEY: Record<ArtifactVariant, string> = {
+  document: 'artifacts.variantDocument',
+  illustrated: 'artifacts.variantIllustrated',
+  presenter: 'artifacts.variantPresenter',
+  detailed: 'artifacts.variantDetailed',
+}
+
 const FORMAT_OPTIONS: ArtifactFormat[] = ['md', 'html', 'docx', 'pptx']
 const LANGUAGE_OPTIONS = [
   'en',
@@ -34,7 +52,7 @@ const LANGUAGE_OPTIONS = [
   'ca',
   'bn',
 ] as const
-const SECTION_OPTIONS = [4, 6, 10] as const
+const SECTION_OPTIONS = [3, 5, 8] as const
 const SUPPORTED_LANGUAGES: readonly string[] = LANGUAGE_OPTIONS
 
 export function defaultArtifactLanguage(uiLanguage: string): string {
@@ -45,6 +63,7 @@ export function defaultArtifactLanguage(uiLanguage: string): string {
 export interface ArtifactFormValues {
   notebookId: string
   kind: ArtifactKind
+  variant: ArtifactVariant
   title: string
   formats: ArtifactFormat[]
   language: string
@@ -72,15 +91,18 @@ export function ArtifactForm({
   const [notebookId, setNotebookId] = useState('')
   const kind = useArtifactFormStore((state) => state.kind)
   const setKind = useArtifactFormStore((state) => state.setKind)
+  const variant = useArtifactFormStore((state) => state.variant)
+  const setVariant = useArtifactFormStore((state) => state.setVariant)
   const [title, setTitle] = useState('')
   const [formats, setFormats] = useState<ArtifactFormat[]>(['md', 'docx'])
   const [language, setLanguage] = useState(() =>
     defaultArtifactLanguage(uiLanguage)
   )
-  const [sections, setSections] = useState<number>(6)
+  const [sections, setSections] = useState<number>(5)
 
   const hasNotebooks = notebooks.length > 0
   const canSubmit = hasNotebooks && formats.length > 0 && !submitting
+  const variantOptions = ARTIFACT_VARIANTS[kind]
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -88,6 +110,7 @@ export function ArtifactForm({
     onSubmit({
       notebookId,
       kind,
+      variant,
       title: title.trim(),
       formats,
       language,
@@ -101,7 +124,7 @@ export function ArtifactForm({
         <p className="text-sm text-destructive">{t('artifacts.noNotebooks')}</p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-2">
           <Label htmlFor="artifact-notebook">{t('artifacts.notebookLabel')}</Label>
           <Select value={notebookId} onValueChange={setNotebookId}>
@@ -133,6 +156,25 @@ export function ArtifactForm({
                   {option === 'deck'
                     ? t('artifacts.kindDeck')
                     : t('artifacts.kindReport')}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="artifact-variant">{t('artifacts.variantLabel')}</Label>
+          <Select
+            value={variant}
+            onValueChange={(value) => setVariant(value as ArtifactVariant)}
+          >
+            <SelectTrigger id="artifact-variant">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {variantOptions.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(VARIANT_LABEL_KEY[option])}
                 </SelectItem>
               ))}
             </SelectContent>

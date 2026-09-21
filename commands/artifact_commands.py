@@ -33,7 +33,12 @@ from open_notebook.artifacts.composition import (
     short_id,
 )
 from open_notebook.artifacts.diagrams import make_renderer, render_diagrams
-from open_notebook.artifacts.outline import SourceRef, complete_text, normalize_kind
+from open_notebook.artifacts.outline import (
+    SourceRef,
+    complete_text,
+    normalize_kind,
+    variant_allows_diagrams,
+)
 from open_notebook.artifacts.paths import to_relative_artifact_path
 from open_notebook.artifacts.render import (
     SUPPORTED_FORMATS,
@@ -60,6 +65,7 @@ class ArtifactGenerationInput(CommandInput):
     instructions: Optional[str] = None
     sections: int = 10
     model_id: Optional[str] = None
+    variant: Optional[str] = None
 
 
 class ArtifactGenerationOutput(CommandOutput):
@@ -182,6 +188,10 @@ async def generate_artifact_command(
         language = input_data.language or "en"
         title = (input_data.title or "").strip() or artifact.title or notebook.name
         max_sections = max(1, int(input_data.sections or 10))
+        variant = (input_data.variant or "").strip() or None
+        # Raises ValueError when the variant belongs to the other kind, before
+        # any work starts.
+        allow_diagrams = variant_allows_diagrams(kind, variant)
 
         notebook_sources = await notebook.get_sources()
         sources = [
@@ -194,8 +204,8 @@ async def generate_artifact_command(
             if source.id
         ]
         logger.info(
-            f"Artifact {artifact.id}: kind={kind} formats={formats} "
-            f"sources={len(sources)}"
+            f"Artifact {artifact.id}: kind={kind} variant={variant} "
+            f"formats={formats} sources={len(sources)}"
         )
 
         out_dir = Path(ARTIFACTS_FOLDER) / str(uuid.uuid4())
@@ -205,8 +215,9 @@ async def generate_artifact_command(
         composition = CompositionConfig(
             language=language,
             instructions=input_data.instructions or "",
-            allow_diagrams=kind == "deck",
+            allow_diagrams=allow_diagrams,
             model_id=input_data.model_id,
+            variant=variant,
         )
 
         markdown, report = await build_document(
@@ -246,6 +257,7 @@ async def generate_artifact_command(
         note_id = await _create_notebook_note(input_data.notebook_id, title, markdown)
 
         artifact.kind = kind
+        artifact.variant = variant
         artifact.formats = list(outputs.keys())
         artifact.language = language
         artifact.title = title

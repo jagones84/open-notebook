@@ -39,6 +39,21 @@ KINDS = ("report", "deck")
 DEFAULT_MAX_SECTIONS = 5
 DEFAULT_LANGUAGE = "en"
 
+#: NotebookLM-style sub-variants, one pair per kind. The name states what the
+#: deliverable IS, never how it is consumed: "interactive" was rejected because
+#: in NotebookLM it means an embedded, playable Studio artifact, while our
+#: text-with-figures report is simply an ILLUSTRATED document.
+VARIANTS: dict[str, tuple[str, ...]] = {
+    "report": ("document", "illustrated"),
+    "deck": ("presenter", "detailed"),
+}
+
+#: Variant used when the request does not name one.
+DEFAULT_VARIANTS: dict[str, str] = {
+    "report": "document",
+    "deck": "presenter",
+}
+
 #: Output-token budgets for the model calls.
 #:
 #: The provisioned model is built with a very small default budget (measured:
@@ -148,6 +163,17 @@ SECTION_RULES_DECK = """- Bullets first: one idea per bullet, short (max 25 word
   content: a wall of fragments is worse than one clear paragraph.
 - The shape serves the material, not the other way around."""
 
+#: A "detailed" deck adds prose to each bullet; the presenter rules still apply,
+#: so they are appended instead of duplicated.
+SECTION_RULES_DECK_DETAILED = (
+    "- Be thorough: write full sentences under every bullet, not fragments, so a\n"
+    "  slide reads as a self-contained explanation on its own (2 to 4 full\n"
+    "  sentences per bullet where the material supports it).\n"
+    "- A bullet with no sentence next to it is a presenter cue, not a detailed\n"
+    "  slide: this variant exists to be read, not only spoken from.\n"
+    + SECTION_RULES_DECK
+)
+
 SECTION_RULES_REPORT = """- Write PROSE in paragraphs. Use a bullet list only when the material really
   is a list: a chapter made of bullets is not a book.
 - This section is a CHAPTER: aim for 700-1200 words, developed in several
@@ -219,6 +245,71 @@ def kind_label(kind: str) -> str:
         ``"a slide presentation"`` for a deck, ``"a report"`` otherwise.
     """
     return "a slide presentation" if normalize_kind(kind) == "deck" else "a report"
+
+
+def normalize_variant(kind: Optional[str], variant: Optional[str]) -> str:
+    """Coerce a requested variant to one valid for the artifact kind.
+
+    Args:
+        kind: Requested kind (``report``/``deck``, legacy ``slides`` allowed).
+        variant: Requested variant; ``None`` or empty selects the default.
+
+    Returns:
+        The variant name, one of ``VARIANTS[kind]``.
+
+    Raises:
+        ValueError: If the variant belongs to the other kind (e.g. a report
+            asked for the deck's ``presenter`` variant).
+    """
+    normalized_kind = normalize_kind(kind)
+    allowed = VARIANTS[normalized_kind]
+    requested = (variant or "").strip().lower()
+    if not requested:
+        return DEFAULT_VARIANTS[normalized_kind]
+    if requested not in allowed:
+        raise ValueError(
+            f"variant {variant!r} is not valid for a {normalized_kind}; "
+            f"choose one of: {', '.join(allowed)}"
+        )
+    return requested
+
+
+def variant_allows_diagrams(kind: Optional[str], variant: Optional[str]) -> bool:
+    """Whether this kind+variant may include ```mermaid``` diagrams.
+
+    A deck is inherently visual, so both of its variants keep diagrams; a
+    report only gets them in the ``illustrated`` variant, because the plain
+    document must stay text only.
+
+    Args:
+        kind: Artifact kind.
+        variant: Requested variant, or ``None`` for the kind's default.
+
+    Returns:
+        ``True`` when diagrams are allowed.
+    """
+    normalized_kind = normalize_kind(kind)
+    normalized_variant = normalize_variant(normalized_kind, variant)
+    if normalized_kind == "deck":
+        return True
+    return normalized_variant == "illustrated"
+
+
+def section_rules(kind: Optional[str], variant: Optional[str] = None) -> str:
+    """Rules block for one section, chosen by kind and variant.
+
+    Args:
+        kind: Artifact kind.
+        variant: Requested variant, or ``None`` for the kind's default.
+
+    Returns:
+        The rules text injected into the section prompt.
+    """
+    normalized_kind = normalize_kind(kind)
+    if normalized_kind == "deck":
+        detailed = normalize_variant(normalized_kind, variant) == "detailed"
+        return SECTION_RULES_DECK_DETAILED if detailed else SECTION_RULES_DECK
+    return SECTION_RULES_REPORT
 
 
 def instructions_block(instructions: str) -> str:

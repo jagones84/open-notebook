@@ -277,9 +277,7 @@ class TestReferencesBlock:
             composition.Chunk(source_id="source:bbb", title="B", text="b"),
             composition.Chunk(source_id="source:aaa", title="A", text="a again"),
         ]
-        block = composition.references_block(
-            chunks, {"source:aaa": 3, "source:bbb": 7}
-        )
+        block = composition.references_block(chunks, {"source:aaa": 3, "source:bbb": 7})
         assert block == "[3] A\n[7] B"
 
     def test_without_chunks_the_block_is_a_placeholder(self):
@@ -610,3 +608,52 @@ class TestBookShape:
 
     def test_the_outline_prompt_asks_for_few_broad_chapters(self):
         assert "chapter" in outline.OUTLINE_PROMPT
+
+
+class TestVariants:
+    """NotebookLM-style sub-variants: report document|illustrated, deck presenter|detailed.
+
+    The name must say what the deliverable IS. "Interactive" was rejected: in
+    NotebookLM it means an embedded, playable Studio artifact, not a static
+    figure, so our text-with-figures variant is called "illustrated".
+    """
+
+    def test_a_report_defaults_to_a_text_only_document(self):
+        assert outline.normalize_variant("report", None) == "document"
+
+    def test_a_deck_defaults_to_presenter_slides(self):
+        assert outline.normalize_variant("deck", None) == "presenter"
+
+    def test_a_variant_of_the_other_kind_is_rejected(self):
+        with pytest.raises(ValueError):
+            outline.normalize_variant("report", "presenter")
+
+    def test_a_deck_variant_is_not_valid_for_a_report(self):
+        assert sorted(outline.VARIANTS["report"]) == ["document", "illustrated"]
+        assert sorted(outline.VARIANTS["deck"]) == ["detailed", "presenter"]
+
+    def test_only_the_illustrated_report_is_given_diagrams(self):
+        assert outline.variant_allows_diagrams("report", "document") is False
+        assert outline.variant_allows_diagrams("report", "illustrated") is True
+        assert outline.variant_allows_diagrams("deck", "presenter") is True
+        assert outline.variant_allows_diagrams("deck", "detailed") is True
+
+    def test_a_detailed_deck_asks_for_full_text_per_slide(self):
+        section = outline.Section(title="One", queries=["q"])
+        detailed = composition.build_section_prompt(
+            section, [], "deck", "en", variant="detailed"
+        )
+        presenter = composition.build_section_prompt(
+            section, [], "deck", "en", variant="presenter"
+        )
+        assert detailed != presenter
+        assert "full sentences" in detailed
+        assert "full sentences" not in presenter
+
+    def test_an_illustrated_report_is_prose_with_diagrams(self):
+        section = outline.Section(title="One", queries=["q"])
+        illustrated = composition.build_section_prompt(
+            section, [], "report", "en", variant="illustrated", allow_diagrams=True
+        )
+        assert "CHAPTER" in illustrated
+        assert "mermaid" in illustrated

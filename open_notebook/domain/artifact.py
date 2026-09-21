@@ -32,6 +32,9 @@ class GeneratedArtifact(ObjectModel):
         notebook: Notebook record link the artifact was generated from.
         title: Human title used for the document and the file names.
         kind: ``report`` (prose document) or ``deck`` (slide presentation).
+        variant: Sub-variant of the kind: ``document``/``illustrated`` for a
+            report, ``presenter``/``detailed`` for a deck. ``None`` means the
+            kind's default was used.
         formats: Requested output formats, a subset of ``md``, ``html``,
             ``docx``, ``pptx`` (``md`` is always written as the pandoc input).
         language: Language the document body is written in.
@@ -50,6 +53,10 @@ class GeneratedArtifact(ObjectModel):
     notebook: Union[str, RecordID] = Field(..., description="Notebook record link")
     title: str = Field(..., description="Document title")
     kind: Literal["report", "deck"] = Field(..., description="Artifact kind")
+    variant: Optional[str] = Field(
+        default=None,
+        description="Kind sub-variant: document/illustrated, presenter/detailed",
+    )
     formats: list[str] = Field(
         default_factory=list, description="Requested output formats"
     )

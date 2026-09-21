@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from surreal_commands import get_command_status, submit_command
 
-from open_notebook.artifacts.outline import normalize_kind
+from open_notebook.artifacts.outline import normalize_kind, normalize_variant
 from open_notebook.artifacts.paths import (
     resolve_contained_artifact_path,
     to_relative_artifact_path,
@@ -70,6 +70,7 @@ class ArtifactService:
         instructions: Optional[str] = None,
         sections: int = 10,
         model_id: Optional[str] = None,
+        variant: Optional[str] = None,
     ) -> Dict[str, str]:
         """Create the artifact row and submit the generation job.
 
@@ -82,17 +83,26 @@ class ArtifactService:
             instructions: Optional user brief for the writer.
             sections: Maximum number of sections to plan.
             model_id: Optional explicit Model record id.
+            variant: Optional kind sub-variant (``document``/``illustrated``
+                for a report, ``presenter``/``detailed`` for a deck).
 
         Returns:
             ``{"command_id": ..., "artifact_id": ...}``.
 
         Raises:
             NotFoundError: If the notebook does not exist.
-            ValueError: If the command module cannot be imported.
+            ValueError: If the command module cannot be imported, or the
+                variant does not belong to the requested kind.
         """
         notebook = await Notebook.get(notebook_id)
 
         norm_kind = normalize_kind(kind)
+        requested_variant = (variant or "").strip()
+        norm_variant = (
+            normalize_variant(norm_kind, requested_variant)
+            if requested_variant
+            else None
+        )
         chosen = ArtifactService._requested_formats(formats)
         doc_title = (title or "").strip() or ArtifactService.default_title(
             notebook.name, norm_kind
@@ -103,6 +113,7 @@ class ArtifactService:
             notebook=notebook_id,
             title=doc_title,
             kind=norm_kind,
+            variant=norm_variant,
             formats=chosen,
             language=language or "en",
             sections=max_sections,
@@ -125,6 +136,7 @@ class ArtifactService:
                 "artifact_id": artifact_id,
                 "notebook_id": notebook_id,
                 "kind": norm_kind,
+                "variant": norm_variant,
                 "formats": chosen,
                 "language": artifact.language,
                 "title": doc_title,

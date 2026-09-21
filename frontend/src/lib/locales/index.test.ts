@@ -171,4 +171,17 @@ describe('artifact type labels (NotebookLM vocabulary)', () => {
   it('names the visual type as a slide deck with diagrams', () => {
     expect(enUS.artifacts.kindDeck).toBe('Slide deck (with diagrams)')
   })
+
+  it('names the plain document style as prose without diagrams', () => {
+    expect(enUS.artifacts.variantDocument).toContain('prose')
+    expect(enUS.artifacts.variantDocument).not.toContain('diagram')
+  })
+
+  it('names the illustrated style as the one that carries diagrams', () => {
+    expect(enUS.artifacts.variantIllustrated).toContain('diagrams')
+  })
+
+  it('names the detailed deck after the prose it adds to each bullet', () => {
+    expect(enUS.artifacts.variantDetailed).toContain('sentences')
+  })
 })

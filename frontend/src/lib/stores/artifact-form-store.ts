@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import type { ArtifactKind } from '@/lib/types/artifacts'
+import {
+  DEFAULT_ARTIFACT_VARIANT,
+  sanitizeVariant,
+  type ArtifactKind,
+  type ArtifactVariant,
+} from '@/lib/types/artifacts'
 
 const KINDS: readonly ArtifactKind[] = ['report', 'deck']
 
@@ -18,29 +23,45 @@ function sanitizeKind(kind: unknown): ArtifactKind {
 
 interface ArtifactFormState {
   kind: ArtifactKind
+  variant: ArtifactVariant
   setKind: (kind: ArtifactKind) => void
+  setVariant: (variant: ArtifactVariant) => void
 }
 
 /**
  * Preferences of the artifact generation form, kept between visits.
  *
- * Only the kind is remembered: the language follows the UI language and the
- * other fields are per-run choices. The kind is the one selection whose
- * consequence (a deck is written as bullets and carries diagrams) is not
- * visible in the form itself, so making the user redo it every time is the
- * difference between getting diagrams or not.
+ * The kind and its variant are remembered: they are the two selections whose
+ * consequence (bullets or prose, with or without diagrams) is not visible in
+ * the form itself, so making the user redo them every time is the difference
+ * between getting the deliverable they wanted or not. Changing the kind resets
+ * the variant, because a variant only means something with its own kind.
  */
 export const useArtifactFormStore = create<ArtifactFormState>()(
   persist(
     (set) => ({
       kind: 'report',
-      setKind: (kind) => set({ kind: sanitizeKind(kind) }),
+      variant: DEFAULT_ARTIFACT_VARIANT.report,
+      setKind: (kind) =>
+        set((state) => {
+          const next = sanitizeKind(kind)
+          return next === state.kind
+            ? { kind: next }
+            : { kind: next, variant: DEFAULT_ARTIFACT_VARIANT[next] }
+        }),
+      setVariant: (variant) =>
+        set((state) => ({ variant: sanitizeVariant(state.kind, variant) })),
     }),
     {
       name: 'artifact-form-storage',
       merge: (persisted, current) => {
         const stored = persisted as Partial<ArtifactFormState> | undefined
-        return { ...current, kind: sanitizeKind(stored?.kind) }
+        const kind = sanitizeKind(stored?.kind)
+        return {
+          ...current,
+          kind,
+          variant: sanitizeVariant(kind, stored?.variant),
+        }
       },
     }
   )

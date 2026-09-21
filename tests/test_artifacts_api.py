@@ -29,6 +29,7 @@ class _FakeArtifact:
         self.notebook = kwargs.get("notebook", "notebook:1")
         self.title = kwargs.get("title", "Doc")
         self.kind = kwargs.get("kind", "report")
+        self.variant = kwargs.get("variant")
         self.formats = kwargs.get("formats", ["md"])
         self.language = kwargs.get("language", "en")
         self.sections = kwargs.get("sections", 2)
@@ -87,6 +88,48 @@ class TestSubmitArtifact:
         response = client.post("/api/artifacts", json={"notebook_id": "notebook:1"})
 
         assert response.status_code == 500
+
+    def test_the_variant_reaches_the_service(self, client, monkeypatch):
+        seen = {}
+
+        async def fake_submit(**kwargs):
+            seen.update(kwargs)
+            return {"command_id": "command:1", "artifact_id": "generated_artifact:1"}
+
+        monkeypatch.setattr(
+            artifacts_router.ArtifactService, "submit_generation_job", fake_submit
+        )
+
+        response = client.post(
+            "/api/artifacts",
+            json={
+                "notebook_id": "notebook:1",
+                "kind": "report",
+                "variant": "illustrated",
+            },
+        )
+
+        assert response.status_code == 202
+        assert seen["variant"] == "illustrated"
+
+    def test_a_variant_of_the_other_kind_is_a_400(self, client, monkeypatch):
+        async def fake_submit(**kwargs):
+            raise ValueError("variant 'presenter' is not valid for a report")
+
+        monkeypatch.setattr(
+            artifacts_router.ArtifactService, "submit_generation_job", fake_submit
+        )
+
+        response = client.post(
+            "/api/artifacts",
+            json={
+                "notebook_id": "notebook:1",
+                "kind": "report",
+                "variant": "presenter",
+            },
+        )
+
+        assert response.status_code == 400
 
 
 class TestListAndGetArtifacts:
@@ -190,3 +233,16 @@ def test_the_default_request_asks_for_a_handful_of_sections():
     """A book is a few broad chapters, not ten topic headings."""
     request = artifacts_router.ArtifactGenerationRequest(notebook_id="notebook:1")
     assert request.sections <= 6
+
+
+def test_the_default_request_is_a_plain_document():
+    """No variant means the text-only document, not an illustrated one."""
+    request = artifacts_router.ArtifactGenerationRequest(notebook_id="notebook:1")
+    assert request.variant is None
+
+
+def test_the_request_accepts_a_variant():
+    request = artifacts_router.ArtifactGenerationRequest(
+        notebook_id="notebook:1", kind="report", variant="illustrated"
+    )
+    assert request.variant == "illustrated"

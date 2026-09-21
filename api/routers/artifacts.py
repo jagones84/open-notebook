@@ -35,6 +35,7 @@ class ArtifactGenerationRequest(BaseModel):
 
     notebook_id: str
     kind: str = "report"
+    variant: Optional[str] = None
     formats: List[str] = Field(default_factory=lambda: ["md", "docx"])
     language: str = "en"
     title: Optional[str] = None
@@ -58,6 +59,7 @@ class ArtifactResponse(BaseModel):
     notebook_id: str
     title: str
     kind: str
+    variant: Optional[str] = None
     formats: List[str]
     language: str
     sections: int
@@ -92,6 +94,7 @@ def _to_response(
         notebook_id=str(artifact.notebook or ""),
         title=artifact.title,
         kind=artifact.kind,
+        variant=artifact.variant,
         formats=list(artifact.formats),
         language=artifact.language,
         sections=artifact.sections,
@@ -133,12 +136,18 @@ async def generate_artifact(request: ArtifactGenerationRequest):
             instructions=request.instructions,
             sections=request.sections,
             model_id=request.model_id,
+            variant=request.variant,
         )
         return ArtifactSubmissionResponse(
             command_id=result["command_id"], artifact_id=result["artifact_id"]
         )
     except HTTPException:
         raise
+    except ValueError as e:
+        # A variant that does not belong to the requested kind is a bad request,
+        # not a server failure.
+        logger.warning(f"Invalid artifact request: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except OpenNotebookError:
         raise
     except Exception as e:

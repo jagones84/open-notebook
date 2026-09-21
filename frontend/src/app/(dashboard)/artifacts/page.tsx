@@ -27,6 +27,7 @@ export default function ArtifactsPage() {
     generate.mutate({
       notebook_id: values.notebookId,
       kind: values.kind,
+      variant: values.variant,
       title: values.title || undefined,
       formats: values.formats,
       language: values.language,

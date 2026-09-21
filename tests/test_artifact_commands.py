@@ -97,6 +97,7 @@ def _patch(monkeypatch, tmp_path, *, markdown=SAMPLE_MARKDOWN, formats=None):
         composition=None,
         sections=None,
     ):
+        rendered["composition"] = composition
         report = {
             "mode": "retrieval",
             "references": [
@@ -202,6 +203,43 @@ class TestGenerateArtifactCommand:
         # Only the cited source is listed.
         assert "Beta" not in (note.content or "")
         assert note.notebook == "notebook:1"
+
+    @pytest.mark.asyncio
+    async def test_an_illustrated_report_is_written_with_diagrams(
+        self, monkeypatch, tmp_path
+    ):
+        rendered = _patch(monkeypatch, tmp_path)
+
+        await artifact_commands.generate_artifact_command(
+            _input(kind="report", variant="illustrated")
+        )
+
+        composition = rendered["composition"]
+        assert composition.variant == "illustrated"
+        assert composition.allow_diagrams is True
+
+    @pytest.mark.asyncio
+    async def test_a_plain_report_is_written_without_diagrams(
+        self, monkeypatch, tmp_path
+    ):
+        rendered = _patch(monkeypatch, tmp_path)
+
+        await artifact_commands.generate_artifact_command(_input(kind="report"))
+
+        composition = rendered["composition"]
+        assert composition.variant is None
+        assert composition.allow_diagrams is False
+
+    @pytest.mark.asyncio
+    async def test_a_variant_of_the_other_kind_fails_the_job(
+        self, monkeypatch, tmp_path
+    ):
+        _patch(monkeypatch, tmp_path)
+
+        with pytest.raises(ValueError):
+            await artifact_commands.generate_artifact_command(
+                _input(kind="report", variant="presenter")
+            )
 
     @pytest.mark.asyncio
     async def test_unsupported_formats_fall_back_to_default(

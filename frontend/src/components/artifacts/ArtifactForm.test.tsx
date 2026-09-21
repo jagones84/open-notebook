@@ -35,7 +35,7 @@ describe('ArtifactForm remembers the type', () => {
 
   beforeEach(() => {
     localStorage.clear()
-    useArtifactFormStore.setState({ kind: 'report' })
+    useArtifactFormStore.setState({ kind: 'report', variant: 'document' })
   })
 
   function submit() {
@@ -52,7 +52,7 @@ describe('ArtifactForm remembers the type', () => {
   })
 
   it('submits the type remembered from a previous visit', () => {
-    useArtifactFormStore.setState({ kind: 'deck' })
+    useArtifactFormStore.setState({ kind: 'deck', variant: 'presenter' })
     expect(submit()).toHaveBeenCalledWith(expect.objectContaining({ kind: 'deck' }))
   })
 
@@ -75,5 +75,61 @@ describe('ArtifactForm remembers the type', () => {
     // must keep the form usable rather than hand a bad value to the Select.
     await useArtifactFormStore.persist.rehydrate()
     expect(useArtifactFormStore.getState().kind).toBe('report')
+  })
+})
+
+describe('ArtifactForm remembers the style', () => {
+  const notebooks = [{ id: 'notebook:1', name: 'Notebook' }]
+
+  beforeEach(() => {
+    localStorage.clear()
+    useArtifactFormStore.setState({ kind: 'report', variant: 'document' })
+  })
+
+  function submit() {
+    const onSubmit = vi.fn()
+    const { container } = render(
+      <ArtifactForm notebooks={notebooks} submitting={false} onSubmit={onSubmit} />
+    )
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    return onSubmit
+  }
+
+  it('submits a plain document when nothing was chosen before', () => {
+    expect(submit()).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'report', variant: 'document' })
+    )
+  })
+
+  it('submits the style remembered from a previous visit', () => {
+    useArtifactFormStore.setState({ kind: 'report', variant: 'illustrated' })
+
+    expect(submit()).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: 'illustrated' })
+    )
+  })
+
+  it('refuses a style belonging to the other type', () => {
+    useArtifactFormStore.getState().setVariant('presenter' as never)
+    expect(useArtifactFormStore.getState().variant).toBe('document')
+  })
+
+  it('resets the style when the type changes', () => {
+    useArtifactFormStore.getState().setVariant('illustrated')
+    useArtifactFormStore.getState().setKind('deck')
+    expect(useArtifactFormStore.getState().variant).toBe('presenter')
+  })
+
+  it('drops a style stored for the other type by an older version', async () => {
+    localStorage.setItem(
+      'artifact-form-storage',
+      JSON.stringify({
+        state: { kind: 'deck', variant: 'illustrated' },
+        version: 0,
+      })
+    )
+    await useArtifactFormStore.persist.rehydrate()
+    expect(useArtifactFormStore.getState().kind).toBe('deck')
+    expect(useArtifactFormStore.getState().variant).toBe('presenter')
   })
 })

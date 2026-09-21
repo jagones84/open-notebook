@@ -25,16 +25,14 @@ from loguru import logger
 from open_notebook.artifacts.outline import (
     DIAGRAM_RULES,
     SECTION_PROMPT,
-    SECTION_RULES_DECK,
-    SECTION_RULES_REPORT,
     Complete,
     Section,
     SourceRef,
     instructions_block,
     kind_label,
     language_name,
-    normalize_kind,
     plan_outline,
+    section_rules,
 )
 from open_notebook.domain.notebook import vector_search
 
@@ -109,6 +107,9 @@ class CompositionConfig:
         allow_diagrams: Ask the model for ```mermaid``` fences per section.
         model_id: Optional explicit Model record id.
         max_section_attempts: Calls per section; the retry halves the material.
+        variant: Sub-variant of the kind (``document``/``illustrated`` for a
+            report, ``presenter``/``detailed`` for a deck); ``None`` uses the
+            kind's default.
     """
 
     language: str = "en"
@@ -116,6 +117,7 @@ class CompositionConfig:
     allow_diagrams: bool = False
     model_id: Optional[str] = None
     max_section_attempts: int = 2
+    variant: Optional[str] = None
 
 
 @dataclass
@@ -436,6 +438,7 @@ def build_section_prompt(
     instructions: str = "",
     allow_diagrams: bool = False,
     numbers: Optional[dict[str, int]] = None,
+    variant: Optional[str] = None,
 ) -> str:
     """Assemble the prompt for one section.
 
@@ -447,13 +450,12 @@ def build_section_prompt(
         instructions: Optional user brief.
         allow_diagrams: Ask for a ```mermaid``` fence when the section fits.
         numbers: Mapping of source record id -> document reference number.
+        variant: Sub-variant (report: ``document``/``illustrated``; deck:
+            ``presenter``/``detailed``). ``None`` selects the kind's default.
 
     Returns:
         The complete section prompt.
     """
-    rules = (
-        SECTION_RULES_DECK if normalize_kind(kind) == "deck" else SECTION_RULES_REPORT
-    )
     return SECTION_PROMPT.format(
         kind_label=kind_label(kind),
         title=section.title,
@@ -462,7 +464,7 @@ def build_section_prompt(
         references_block=references_block(chunks, numbers),
         chunks_block=chunks_block(chunks, numbers),
         language=language_name(language),
-        rules=rules,
+        rules=section_rules(kind, variant),
         diagrams=DIAGRAM_RULES if allow_diagrams else "",
     )
 
@@ -496,6 +498,7 @@ async def generate_section(
         cfg.instructions,
         cfg.allow_diagrams,
         numbers,
+        cfg.variant,
     )
     try:
         return await complete(prompt)
