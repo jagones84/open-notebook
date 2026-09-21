@@ -33,7 +33,7 @@ from open_notebook.artifacts.composition import (
     short_id,
 )
 from open_notebook.artifacts.diagrams import make_renderer, render_diagrams
-from open_notebook.artifacts.outline import complete_text, normalize_kind
+from open_notebook.artifacts.outline import SourceRef, complete_text, normalize_kind
 from open_notebook.artifacts.paths import to_relative_artifact_path
 from open_notebook.artifacts.render import (
     SUPPORTED_FORMATS,
@@ -87,41 +87,50 @@ def _requested_formats(formats: Optional[list[str]]) -> list[str]:
     return chosen or list(DEFAULT_FORMATS)
 
 
-def _used_source_ids(report: dict[str, Any]) -> list[str]:
-    """Collect the distinct source ids a run actually wrote from.
+def _source_url(source: Any) -> str:
+    """Read a source's URL, tolerating both asset shapes.
 
     Args:
-        report: Run report produced by ``build_document``.
+        source: Domain source object.
 
     Returns:
-        Source record ids in first-seen order.
+        The URL, or an empty string when the source is not a link.
     """
-    ids: list[str] = []
-    for section in report.get("sections") or []:
-        for chunk in section.get("chunks") or []:
-            source_id = str(chunk.get("source_id") or "")
-            if source_id and source_id not in ids:
-                ids.append(source_id)
-    return ids
+    asset = getattr(source, "asset", None)
+    url = asset.get("url") if isinstance(asset, dict) else getattr(asset, "url", None)
+    return str(url or "")
 
 
-def _sources_section(report: dict[str, Any], titles: dict[str, str]) -> str:
-    """Build a trailing ``## Sources`` section from the cited sources.
+def _references_section(report: dict[str, Any]) -> str:
+    """Build the trailing numbered ``## References`` section.
+
+    Written here and not by the model: the entries are the sources the body
+    actually cites, kept in the document's reference numbering, and carry the
+    title AND the link so that every ``[N]`` in the body resolves to something
+    the reader can open.
 
     Args:
         report: Run report produced by ``build_document``.
-        titles: Mapping of source record id -> source title.
 
     Returns:
         The section Markdown, or an empty string when nothing was cited.
     """
-    ids = _used_source_ids(report)
-    if not ids:
+    cited = {int(number) for number in (report.get("cited_numbers") or [])}
+    entries = [
+        reference
+        for reference in (report.get("references") or [])
+        if int(reference.get("number") or 0) in cited
+    ]
+    if not entries:
         return ""
-    lines = ["## Sources", ""]
-    for source_id in ids:
-        label = titles.get(source_id) or short_id(source_id)
-        lines.append(f"- {label} [source:{short_id(source_id)}]")
+    entries.sort(key=lambda reference: int(reference.get("number") or 0))
+    lines = ["## References", ""]
+    for reference in entries:
+        number = int(reference.get("number") or 0)
+        source_id = str(reference.get("source_id") or "")
+        title = str(reference.get("title") or "").strip() or short_id(source_id)
+        url = str(reference.get("url") or "").strip()
+        lines.append(f"{number}. [{title}]({url})" if url else f"{number}. {title}")
     return "\n".join(lines)
 
 
@@ -174,15 +183,19 @@ async def generate_artifact_command(
         title = (input_data.title or "").strip() or artifact.title or notebook.name
         max_sections = max(1, int(input_data.sections or 10))
 
-        sources = await notebook.get_sources()
-        source_titles = [source.title or "" for source in sources]
-        allowed_ids = [str(source.id) for source in sources if source.id]
-        titles_by_id = {
-            str(source.id): (source.title or "") for source in sources if source.id
-        }
+        notebook_sources = await notebook.get_sources()
+        sources = [
+            SourceRef(
+                source_id=str(source.id),
+                title=source.title or "",
+                url=_source_url(source),
+            )
+            for source in notebook_sources
+            if source.id
+        ]
         logger.info(
             f"Artifact {artifact.id}: kind={kind} formats={formats} "
-            f"sources={len(allowed_ids)}"
+            f"sources={len(sources)}"
         )
 
         out_dir = Path(ARTIFACTS_FOLDER) / str(uuid.uuid4())
@@ -199,14 +212,13 @@ async def generate_artifact_command(
         markdown, report = await build_document(
             complete_text,
             make_notebook_search(input_data.notebook_id),
-            source_titles,
-            allowed_ids,
+            sources,
             title,
             kind,
             retrieval,
             composition,
         )
-        # Check BEFORE the Sources section is appended: an empty body must
+        # Check BEFORE the References section is appended: an empty body must
         # fail the job, not be rescued into a document that is only a
         # bibliography with nothing to cite.
         if not markdown.strip():
@@ -219,9 +231,9 @@ async def generate_artifact_command(
         if diagram_report.get("failures"):
             logger.warning(f"Diagram failures: {diagram_report['failures']}")
 
-        sources_md = _sources_section(report, titles_by_id)
-        if sources_md:
-            markdown = f"{markdown.rstrip()}\n\n{sources_md}\n"
+        references_md = _references_section(report)
+        if references_md:
+            markdown = f"{markdown.rstrip()}\n\n{references_md}\n"
 
         base_name = build_base_name(title, kind)
         outputs = render_artifact(markdown, out_dir, base_name, formats)

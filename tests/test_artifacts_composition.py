@@ -113,6 +113,28 @@ class TestSelectChunks:
         chunks = composition.select_chunks([hit], [], composition.RetrievalConfig())
         assert chunks[0].similarity == 0.0
 
+    def test_one_source_cannot_fill_the_whole_budget(self):
+        hits = [make_hit(text=f"a{i}") for i in range(5)]
+        hits.append(make_hit(source_id="source:bbb", title="B", text="b0"))
+        hits.append(make_hit(source_id="source:ccc", title="C", text="c0"))
+        cfg = composition.RetrievalConfig(
+            max_chunks_per_section=4, max_chunks_per_source=2
+        )
+        chunks = composition.select_chunks(hits, [], cfg)
+        assert len(chunks) == 4
+        assert {c.source_id for c in chunks} == {
+            "source:aaa",
+            "source:bbb",
+            "source:ccc",
+        }
+
+    def test_the_cap_is_lifted_when_it_would_starve_the_budget(self):
+        cfg = composition.RetrievalConfig(
+            max_chunks_per_section=4, max_chunks_per_source=2
+        )
+        hits = [make_hit(text=f"a{i}") for i in range(6)]
+        assert len(composition.select_chunks(hits, [], cfg)) == 4
+
 
 class TestNormalizeHit:
     def test_vector_search_row_is_mapped_to_the_internal_shape(self):
@@ -188,41 +210,89 @@ class TestRetrieveForSection:
 
 
 class TestVerifyCitations:
-    def test_numbers_are_resolved_to_real_source_ids(self):
+    NUMBERS = {"source:aaa": 1, "source:bbb": 2}
+
+    def test_numbers_of_excerpted_sources_are_kept(self):
         chunks = [
             composition.Chunk(source_id="source:aaa", title="A", text="a"),
             composition.Chunk(source_id="source:bbb", title="B", text="b"),
         ]
         cleaned, unknown = composition.verify_citations(
-            "Fact [source:1] and other [source:2].", chunks
+            "Fact [source:1] and other [source:2].", chunks, self.NUMBERS
         )
-        assert cleaned == "Fact [source:aaa] and other [source:bbb]."
+        assert cleaned == "Fact [source:1] and other [source:2]."
         assert unknown == []
 
     def test_unresolvable_citations_are_dropped(self):
         chunks = [composition.Chunk(source_id="source:aaa", title="A", text="a")]
         cleaned, unknown = composition.verify_citations(
-            "Kept [source:1]. Gone [source:9]. Gone [source:zzz].", chunks
+            "Kept [source:1]. Gone [source:9]. Gone [source:zzz].",
+            chunks,
+            self.NUMBERS,
         )
-        assert cleaned == "Kept [source:aaa]. Gone . Gone ."
+        assert cleaned == "Kept [source:1]. Gone . Gone ."
         assert unknown == ["9", "zzz"]
 
-    def test_a_full_source_id_is_accepted(self):
-        chunks = [composition.Chunk(source_id="source:aaa", title="A", text="a")]
-        cleaned, unknown = composition.verify_citations("[source:aaa]", chunks)
-        assert cleaned == "[source:aaa]"
+    def test_a_record_id_is_rewritten_to_its_number(self):
+        chunks = [composition.Chunk(source_id="source:bbb", title="B", text="b")]
+        cleaned, unknown = composition.verify_citations(
+            "[source:bbb] twice [source:bbb]", chunks, self.NUMBERS
+        )
+        assert cleaned == "[source:2] twice [source:2]"
         assert unknown == []
 
-    def test_an_index_outside_the_chunk_list_is_dropped(self):
+    def test_a_number_outside_the_chunk_list_is_dropped(self):
         chunks = [composition.Chunk(source_id="source:aaa", title="A", text="a")]
-        cleaned, unknown = composition.verify_citations("[source:2]", chunks)
+        cleaned, unknown = composition.verify_citations(
+            "[source:2]", chunks, self.NUMBERS
+        )
         assert cleaned == ""
         assert unknown == ["2"]
+
+    def test_numbers_fall_back_to_the_excerpt_position(self):
+        chunks = [composition.Chunk(source_id="source:aaa", title="A", text="a")]
+        cleaned, unknown = composition.verify_citations("[source:1]", chunks)
+        assert cleaned == "[source:1]"
+        assert unknown == []
 
     def test_text_without_citations_is_untouched(self):
         cleaned, unknown = composition.verify_citations("plain text", [])
         assert cleaned == "plain text"
         assert unknown == []
+
+
+class TestRenderCitations:
+    def test_resolved_tokens_become_plain_numbers(self):
+        rendered = composition.render_citations("Fact [source:2]. More [source:10].")
+        assert rendered == "Fact [2]. More [10]."
+
+    def test_unresolved_tokens_are_left_alone(self):
+        assert composition.render_citations("[source:aaa]") == "[source:aaa]"
+
+
+class TestReferencesBlock:
+    def test_only_the_excerpted_sources_are_listed_once(self):
+        chunks = [
+            composition.Chunk(source_id="source:aaa", title="A", text="a"),
+            composition.Chunk(source_id="source:bbb", title="B", text="b"),
+            composition.Chunk(source_id="source:aaa", title="A", text="a again"),
+        ]
+        block = composition.references_block(
+            chunks, {"source:aaa": 3, "source:bbb": 7}
+        )
+        assert block == "[3] A\n[7] B"
+
+    def test_without_chunks_the_block_is_a_placeholder(self):
+        assert composition.references_block([], {}) == "- (none)"
+
+    def test_the_number_and_title_reach_the_section_prompt(self):
+        section = outline.Section(title="One", queries=["alpha"])
+        chunks = [composition.Chunk(source_id="source:bbb", title="B", text="body")]
+        prompt = composition.build_section_prompt(
+            section, chunks, "report", "en", numbers={"source:bbb": 5}
+        )
+        assert "[5] B" in prompt
+        assert "[source:5] (source: B)\nbody" in prompt
 
 
 class TestComposeSection:
@@ -292,8 +362,8 @@ class TestBuildSectionPrompt:
         chunks = [composition.Chunk(source_id="source:aaa", title="A", text="body")]
         deck = composition.build_section_prompt(section, chunks, "deck", "it")
         report = composition.build_section_prompt(section, chunks, "report", "it")
-        assert "bullets per section" in deck
-        assert "bullets per section" not in report
+        assert "one idea per bullet" in deck
+        assert "one idea per bullet" not in report
         # A raw ISO code ("it") is ignored by the model; the prompt must carry
         # the language NAME.
         assert "Write in Italian" in deck
@@ -334,8 +404,7 @@ class TestBuildDocument:
         document, report = await composition.build_document(
             complete,
             search,
-            ["Source A"],
-            ["source:aaa"],
+            [outline.SourceRef("source:aaa", "Source A")],
             "My title",
             "report",
             composition.RetrievalConfig(),
@@ -344,12 +413,21 @@ class TestBuildDocument:
         )
 
         assert document.startswith("# My title")
-        assert "[source:aaa]" in document
+        assert "Body [1]." in document
         assert "[source:7]" not in document
         assert report["mode"] == "retrieval"
         assert report["sections_written"] == 1
         assert report["unknown_citations"] == ["7"]
         assert report["sections"][0]["chunks"][0]["source_id"] == "source:aaa"
+        assert report["references"] == [
+            {
+                "number": 1,
+                "source_id": "source:aaa",
+                "title": "Source A",
+                "url": "",
+            }
+        ]
+        assert report["cited_numbers"] == [1]
 
     @pytest.mark.asyncio
     async def test_verification_can_be_disabled(self):
@@ -357,8 +435,7 @@ class TestBuildDocument:
         document, _ = await composition.build_document(
             make_complete(["## One\n[source:9]"]),
             make_search([make_hit()]),
-            ["Source A"],
-            ["source:aaa"],
+            [outline.SourceRef("source:aaa", "Source A")],
             "T",
             "report",
             cfg,
@@ -372,8 +449,7 @@ class TestBuildDocument:
         document, report = await composition.build_document(
             make_complete([""]),
             make_search([make_hit()]),
-            ["Source A"],
-            ["source:aaa"],
+            [outline.SourceRef("source:aaa", "Source A")],
             "T",
             "report",
             composition.RetrievalConfig(),
@@ -400,14 +476,57 @@ class TestBuildDocument:
         document, report = await composition.build_document(
             complete,
             make_search([make_hit()]),
-            ["Source A"],
-            ["source:aaa"],
+            [outline.SourceRef("source:aaa", "Source A")],
             "T",
             "report",
             composition.RetrievalConfig(),
         )
         assert "## Planned" in document
         assert report["sections"][0]["title"] == "Planned"
+
+    @pytest.mark.asyncio
+    async def test_a_planned_bibliography_section_is_dropped(self):
+        sections = [
+            outline.Section(title="One", queries=["alpha"]),
+            outline.Section(title="Sources", queries=["alpha"]),
+        ]
+        document, report = await composition.build_document(
+            make_complete(["## One\nBody [source:1]"]),
+            make_search([make_hit()]),
+            [outline.SourceRef("source:aaa", "Source A")],
+            "T",
+            "report",
+            composition.RetrievalConfig(),
+            composition.CompositionConfig(),
+            sections,
+        )
+        assert "## One" in document
+        assert "## Sources" not in document
+        assert report["sections_written"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_section_that_wrote_nothing_cites_nothing(self):
+        sections = [
+            outline.Section(title="One", queries=["alpha"]),
+            outline.Section(title="Two", queries=["alpha"]),
+        ]
+        complete = make_complete(["## One\nBody [source:1]", ""])
+
+        document, report = await composition.build_document(
+            complete,
+            make_search([make_hit()]),
+            [outline.SourceRef("source:aaa", "Source A")],
+            "T",
+            "report",
+            composition.RetrievalConfig(),
+            composition.CompositionConfig(max_section_attempts=1),
+            sections,
+        )
+
+        # Section Two retrieved the same excerpt but produced no text: its
+        # source must not appear in the reference list.
+        assert report["sections_written"] == 1
+        assert report["cited_numbers"] == [1]
 
 
 class TestAssembleAndConfig:
@@ -421,9 +540,12 @@ class TestAssembleAndConfig:
     def test_config_defaults_match_the_standalone_config(self):
         cfg = composition.config_from_dict(None)
         assert cfg.outline_max_sections == 10
-        assert cfg.chunks_per_query == 6
-        assert cfg.max_chunks_per_section == 8
         assert cfg.min_score == 0.2
+        assert cfg.chunks_per_query == 10
+        assert cfg.max_chunks_per_section == 30
+        assert cfg.max_chunks_per_source == 4
+        assert cfg.max_chars_per_chunk == 2000
+        assert cfg.max_chars_per_section == 40000
 
     def test_config_overrides_are_applied(self):
         cfg = composition.config_from_dict(
@@ -431,3 +553,43 @@ class TestAssembleAndConfig:
         )
         assert cfg.min_score == 0.5
         assert cfg.verify_citations is False
+
+
+class TestBookScaleBudgets:
+    """The defaults must fit a BOOK CHAPTER, not a slide-sized section."""
+
+    def test_one_section_keeps_twenty_long_excerpts(self):
+        hits = [
+            make_hit(source_id=f"source:{i}", title="T", text="x" * 1500)
+            for i in range(20)
+        ]
+        chunks = composition.select_chunks(hits, [], composition.RetrievalConfig())
+        assert len(chunks) == 20
+
+    def test_a_section_budget_is_tens_of_thousands_of_characters(self):
+        cfg = composition.RetrievalConfig()
+        assert cfg.max_chars_per_section >= 40000
+        assert cfg.max_chunks_per_section >= 30
+        assert cfg.chunks_per_query >= 10
+        assert cfg.max_chars_per_chunk >= 2000
+        assert cfg.max_chunks_per_source >= 4
+
+    def test_the_writer_is_given_room_for_a_long_section(self):
+        assert outline.DEFAULT_COMPLETION_MAX_TOKENS >= 16384
+        assert outline.DEFAULT_OUTLINE_MAX_TOKENS >= 4096
+
+
+class TestSectionFormatRules:
+    """Bullets must not be forced: the shape follows the material."""
+
+    def test_the_deck_allows_a_short_paragraph_when_a_list_would_distort(self):
+        assert "short paragraph" in outline.SECTION_RULES_DECK
+
+    def test_the_deck_does_not_fix_every_section_at_four_bullets(self):
+        assert "4 to 6 bullets" not in outline.SECTION_RULES_DECK
+
+    def test_a_deck_point_may_hold_an_idea_longer_than_eighteen_words(self):
+        assert "max 18 words" not in outline.SECTION_RULES_DECK
+
+    def test_the_report_does_not_cap_the_prose_at_four_lines(self):
+        assert "max 4 lines" not in outline.SECTION_RULES_REPORT

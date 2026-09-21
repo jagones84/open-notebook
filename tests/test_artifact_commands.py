@@ -17,16 +17,20 @@ SAMPLE_MARKDOWN = "## Overview\n\nGrounded text [source:1]\n"
 
 
 class _FakeSource:
-    def __init__(self, source_id: str, title: str) -> None:
+    def __init__(self, source_id: str, title: str, url: str = "") -> None:
         self.id = source_id
         self.title = title
+        self.asset = {"url": url}
 
 
 class _FakeNotebook:
     name = "My Notebook"
 
     async def get_sources(self):
-        return [_FakeSource("source:1", "Alpha"), _FakeSource("source:2", "Beta")]
+        return [
+            _FakeSource("source:1", "Alpha", "https://example.com/alpha"),
+            _FakeSource("source:2", "Beta", "https://example.com/beta"),
+        ]
 
 
 class _FakeNotebookModel:
@@ -86,8 +90,7 @@ def _patch(monkeypatch, tmp_path, *, markdown=SAMPLE_MARKDOWN, formats=None):
     async def fake_build_document(
         complete,
         search,
-        source_titles,
-        allowed_source_ids,
+        sources,
         title,
         kind,
         cfg,
@@ -96,6 +99,21 @@ def _patch(monkeypatch, tmp_path, *, markdown=SAMPLE_MARKDOWN, formats=None):
     ):
         report = {
             "mode": "retrieval",
+            "references": [
+                {
+                    "number": 1,
+                    "source_id": "source:1",
+                    "title": "Alpha",
+                    "url": "https://example.com/alpha",
+                },
+                {
+                    "number": 2,
+                    "source_id": "source:2",
+                    "title": "Beta",
+                    "url": "https://example.com/beta",
+                },
+            ],
+            "cited_numbers": [1],
             "sections": [
                 {
                     "title": "Overview",
@@ -178,7 +196,11 @@ class TestGenerateArtifactCommand:
         note = _FakeNote.created[0]
         assert note.note_type == "ai"
         assert "Grounded text" in (note.content or "")
-        assert "## Sources" in (note.content or "")
+        # The reference list is written by the command, numbered and linked.
+        assert "## References" in (note.content or "")
+        assert "1. [Alpha](https://example.com/alpha)" in (note.content or "")
+        # Only the cited source is listed.
+        assert "Beta" not in (note.content or "")
         assert note.notebook == "notebook:1"
 
     @pytest.mark.asyncio

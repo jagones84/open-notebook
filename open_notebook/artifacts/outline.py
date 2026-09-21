@@ -48,8 +48,15 @@ DEFAULT_LANGUAGE = "en"
 #: to the fallback skeleton and most sections are dropped. The app already
 #: passes an explicit budget elsewhere for the same reason (``graphs/chat.py``
 #: uses 8192), so the artifact calls do too.
-DEFAULT_COMPLETION_MAX_TOKENS = 4096
-DEFAULT_OUTLINE_MAX_TOKENS = 2048
+#:
+#: Measured again on a 6-section deck over 33 sources (2026-09-21): at 4096 the
+#: reasoning model still returned an empty reply for 3 sections, and one of them
+#: never recovered on the retry and was dropped from the document. At 8192 one
+#: section came back TRUNCATED mid-sentence ("- A harness is the"). A section is
+#: now allowed to be a book chapter, so the visible reply must have room to
+#: exceed the thinking block by a wide margin: hence 16384.
+DEFAULT_COMPLETION_MAX_TOKENS = 16384
+DEFAULT_OUTLINE_MAX_TOKENS = 4096
 
 #: Planner attempts. Measured: a reasoning model occasionally answers the
 #: planning prompt with prose or an empty block instead of the JSON object, and
@@ -95,6 +102,21 @@ class Section:
     queries: list[str] = field(default_factory=list)
 
 
+@dataclass
+class SourceRef:
+    """One notebook source, numbered for citation in the final document.
+
+    Attributes:
+        source_id: Source record id.
+        title: Human-readable source title, used as the citation label.
+        url: Source URL; empty for sources that are not links (e.g. pasted text).
+    """
+
+    source_id: str
+    title: str = ""
+    url: str = ""
+
+
 OUTLINE_PROMPT = """You are an editor planning a technical document.
 
 TITLE: {title}
@@ -113,14 +135,20 @@ MANDATORY RULES:
   sources, NOT questions) used to retrieve that section's material.
 - If two sections would use the same material, merge them.
 - Cover the topic completely but without repetition.
+- Never plan a "Sources", "References" or "Bibliography" section: that list is
+  appended automatically, from the sources actually cited.
 """
 
-SECTION_RULES_DECK = """- Every bullet: max 18 words, one idea only.
-- 4 to 6 bullets per section.
-- No long paragraphs: this is a presentation."""
+SECTION_RULES_DECK = """- Bullets first: one idea per bullet, short (max 25 words).
+- Use as many bullets as the MATERIAL supports (4 to 12). Never pad to reach a
+  number and never compress to fit one.
+- Use a short paragraph instead of a list when a list would distort the
+  content: a wall of fragments is worse than one clear paragraph.
+- The shape serves the material, not the other way around."""
 
-SECTION_RULES_REPORT = """- Short paragraphs (max 4 lines) and, where useful, bullets.
-- Go deep on the concrete details present in the MATERIAL."""
+SECTION_RULES_REPORT = """- Write prose, in short paragraphs; use bullets only for genuine lists.
+- Depth over brevity: go as deep as the MATERIAL allows on the concrete
+  details, without repeating yourself and without filler."""
 
 DIAGRAM_RULES = """- If the section describes a process, an architecture, a flow or a
   structured comparison, add ONE ```mermaid block with a valid diagram
@@ -135,15 +163,20 @@ SECTION_PROMPT = """Write ONE section of {kind_label}.
 SECTION TITLE: {title}
 THESIS: {thesis}
 {instructions_block}
-MATERIAL (excerpts retrieved from the sources; every excerpt has an id in
-square brackets):
+CITABLE REFERENCES (the only sources you may cite in this section):
+{references_block}
+
+MATERIAL (excerpts retrieved from the sources; every excerpt is preceded by the
+reference number of the source it comes from):
 {chunks_block}
 
 MANDATORY RULES:
 - Use the MATERIAL only. Do not invent facts, numbers or names.
-- Every time you state something specific add the citation [source:N]
-  using the NUMBER of the excerpt it comes from (e.g. [source:1]).
-- Never cite a number that does not appear in the MATERIAL.
+- Every time you state something specific add the citation [source:N] using the
+  reference number that precedes the excerpt it comes from (e.g. [source:1]).
+- Never cite a number that is not listed under CITABLE REFERENCES.
+- Never write a "Sources", "References" or "Bibliography" section: it is
+  appended automatically, with the source titles and links.
 - Write in {language}.
 - Start the answer with "## {title}" and do not repeat the title elsewhere.
 {rules}
